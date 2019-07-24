@@ -1,4 +1,5 @@
 Fork from https://github.com/corny/luftdaten-python
+
 Restructured Skript, added Socket to provide data to own local Homepage and added upload to openSenseMap
 
 Configuration and systemd unit not needed. Run it with "nohup python3 main.py &"
