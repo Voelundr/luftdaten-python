@@ -67,7 +67,7 @@ def push2opensense():
     temperature_ID = "" # your senseBox temperature sensor ID
     humidity_ID = "" #  senseBox humidity sensor ID
     pressure_ID = "" # your senseBox pressure sensor ID
-    ts = datetime.datetime.utcnow().isoformat("T")+"Z" # RFC 3339 Timestamp # optional # requires import datetime
+    ts = data_array[6] # RFC 3339 Timestamp # optional
     loc = {"lat": , "lng": , "height": } # location object # optional # insert your lat lng and height (optional)
     try:
         requests.post("https://api.opensensemap.org/boxes/"+senseBox_ID+"/data",
