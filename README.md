@@ -1,3 +1,11 @@
+For from https://github.com/corny/luftdaten-python
+Restructured Skript, added Socket to provide data to own local Homepage and added upload to openSenseMap
+
+Configuration and systemd unit not needed. Run it with "nohup python3 main.py"
+
+New Dpendencies: A Webserver
+Put the index.php in the www-document location or use the socket api to include the values in your existing webpage.
+
 # dusty-python
 
 Python 3 program for the [luftdaten.info](http://luftdaten.info/) sensor network.
