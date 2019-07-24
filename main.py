@@ -2,118 +2,41 @@
 
 import sys
 import os
-import yaml
+import time
+import datetime
+import socket
+import requests
+from phpserialize import *
+from threading import Thread
+import numpy as np
 
 # Import-Pfade setzen
 sys.path.append(os.path.join(sys.path[0],"sds011"))
 sys.path.append(os.path.join(sys.path[0],"bme280"))
 
-import time
-import json
-import requests
-import numpy as np
 from sds011 import SDS011
+import Adafruit_DHT
 from Adafruit_BME280 import *
-
-# Config
-with open("config.yml", 'r') as ymlfile:
-    config = yaml.load(ymlfile)
 
 # Logging
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
+# logging.basicConfig(level=logging.DEBUG)
+
+# Create an instance of your bme280
+dusty = SDS011('/dev/ttyUSB0')
+# Set dutycyle to nocycle (permanent)
+dusty.dutycycle = 0
 
 bme280 = BME280(
-    address=0x76,
+    address=0x77,
     t_mode=BME280_OSAMPLE_8,
     p_mode=BME280_OSAMPLE_8,
     h_mode=BME280_OSAMPLE_8,
 )
 
-# Create an instance of your bme280
-dusty = SDS011('/dev/ttyUSB0')
+data_array = []
 
-# Now we have some details about it
-print("SDS011 initialized: device_id={} firmware={}".format(dusty.device_id,dusty.firmware))
-
-# Set dutycyle to nocycle (permanent)
-dusty.dutycycle = 0
-
-class Measurement:
-    def __init__(self):
-        pm25_values = []
-        pm10_values = []
-        dusty.workstate = SDS011.WorkStates.Measuring
-        try:
-            for a in range(8):
-                values = dusty.get_values()
-                if values is not None:
-                    pm10_values.append(values[0])
-                    pm25_values.append(values[1])
-        finally:
-            dusty.workstate = SDS011.WorkStates.Sleeping
-
-        self.pm25_value  = np.mean(pm25_values)
-        self.pm10_value  = np.mean(pm10_values)
-        self.temperature = bme280.read_temperature()
-        self.humidity    = bme280.read_humidity()
-        self.pressure    = bme280.read_pressure()
-
-    def sendInflux(self):
-        cfg = config['influxdb']
-
-        if not cfg['enabled']:
-            return
-
-        data = "feinstaub,node={} SDS_P1={:0.2f},SDS_P2={:0.2f},BME280_temperature={:0.2f},BME280_pressure={:0.2f},BME280_humidity={:0.2f}".format(
-            cfg['node'],
-            self.pm10_value,
-            self.pm25_value,
-            self.temperature,
-            self.pressure,
-            self.humidity,
-        )
-
-        requests.post(cfg['url'],
-            auth=(cfg['username'], cfg['password']),
-            data=data,
-        )
-
-    def sendLuftdaten(self):
-        if not config['luftdaten']['enabled']:
-            return
-
-        self.__pushLuftdaten('https://api-rrd.madavi.de/data.php', 0, {
-            "SDS_P1":             self.pm10_value,
-            "SDS_P2":             self.pm25_value,
-            "BME280_temperature": self.temperature,
-            "BME280_pressure":    self.pressure,
-            "BME280_humidity":    self.humidity,
-        })
-        self.__pushLuftdaten('https://api.luftdaten.info/v1/push-sensor-data/', 1, {
-            "P1": self.pm10_value,
-            "P2": self.pm25_value,
-        })
-        self.__pushLuftdaten('https://api.luftdaten.info/v1/push-sensor-data/', 11, {
-            "temperature": self.temperature,
-            "pressure":    self.pressure,
-            "humidity":    self.humidity,
-        })
-
-
-    def __pushLuftdaten(self, url, pin, values):
-        requests.post(url,
-            json={
-                "software_version": "python-dusty 0.0.1",
-                "sensordatavalues": [{"value_type": key, "value": val} for key, val in values.items()],
-            },
-            headers={
-                "X-PIN":    str(pin),
-                "X-Sensor": sensorID,
-            }
-        )
-
-# extracts serial from cpuinfo
 def getSerial():
     with open('/proc/cpuinfo','r') as f:
         for line in f:
@@ -121,25 +44,113 @@ def getSerial():
                 return(line[10:26])
     raise Exception('CPU serial not found')
 
-def run():
-    m = Measurement()
+def pushLuftdaten(url, pin, values):
+    try:
+        requests.post(url,
+            json={
+                "software_version": "python-dusty 0.0.2",
+                "sensordatavalues": [{"value_type": key, "value": val} for key, val in values.items()],
+            },
+            headers={
+                "X-PIN":    str(pin),
+                "X-Sensor": sensorID,
+            },
+            timeout=10
+        )
+    except:
+        pass       
 
-    print('pm2.5     = {:f} '.format(m.pm25_value))
-    print('pm10      = {:f} '.format(m.pm10_value))
-    print('Temp      = {:0.2f} deg C'.format(m.temperature))
-    print('Humidity  = {:0.2f} %'.format(m.humidity))
-    print('Pressure  = {:0.2f} hPa'.format(m.pressure/100))
+def push2opensense():
+    senseBox_ID = "" # your senseBox ID
+    pm10_ID = "" # your senseBox PM10 sensor ID
+    pm25_ID = "" # your senseBox PM25 sensor ID
+    temperature_ID = "" # your senseBox temperature sensor ID
+    humidity_ID = "" #  senseBox humidity sensor ID
+    pressure_ID = "" # your senseBox pressure sensor ID
+    ts = datetime.datetime.utcnow().isoformat("T")+"Z" # RFC 3339 Timestamp # optional # requires import datetime
+    loc = {"lat": , "lng": , "height": } # location object # optional # insert your lat lng and height (optional)
+    try:
+        requests.post("https://api.opensensemap.org/boxes/"+senseBox_ID+"/data",
+            json={
+                #SDS011 P10
+                pm10_ID: [data_array[0], ts, loc],
+                # SDS011 P25
+                pm25_ID: [data_array[1], ts, loc],                
+                #BME Temp
+                temperature_ID: [data_array[2], ts, loc],
+                #BME Hum
+                humidity_ID: [data_array[3], ts, loc],
+                #BME Press
+                pressure_ID: [data_array[4]/100, ts, loc], # Pressure in hPA, remove "\100" if you want the value in Pa
+            },
+            headers={
+                "content-type": "application/json"
+            },
+            timeout=10 # optional 
+        )            
+    except:
+        pass
 
-    m.sendLuftdaten()
-    m.sendInflux()
+def send_sensor_data():
+    pushLuftdaten('https://api-rrd.madavi.de/data.php', 0, {
+        "SDS_P1":             data_array[0],
+        "SDS_P2":             data_array[1],
+        "BME280_temperature": data_array[2],
+        "BME280_pressure":    data_array[4],
+        "BME280_humidity":    data_array[3],
+    })
+    pushLuftdaten('https://api.luftdaten.info/v1/push-sensor-data/', 1, {
+        "P1": data_array[0],
+        "P2": data_array[1],
+    })
+    pushLuftdaten('https://api.luftdaten.info/v1/push-sensor-data/', 11, {
+        "temperature": data_array[2],
+        "pressure":    data_array[4],
+        "humidity":    data_array[3],
+    })
+    push2opensense()
 
+def read_sensor_data():
+    pm25_values = []
+    pm10_values = []
+    dusty.workstate = SDS011.WorkStates.Measuring
+    try:
+        for a in range(8):
+            values = dusty.get_values()
+            if values is not None:
+                pm10_values.append(values[0])
+                pm25_values.append(values[1])
+    finally:
+        dusty.workstate = SDS011.WorkStates.Sleeping
 
-sensorID  = config['luftdaten'].get('sensor') or ("raspi-" + getSerial())
-starttime = time.time()
+    pm25_value   = np.mean(pm25_values)
+    pm10_value   = np.mean(pm10_values)
+    temperature  = bme280.read_temperature()
+    humidity     = bme280.read_humidity()
+    pressure     = bme280.read_pressure()
+    # hum2, temp2  = Adafruit_DHT.read_retry(Adafruit_DHT.DHT22, 23)
+    global data_array
+    data_array   = [pm10_value, pm25_value, temperature, humidity, pressure, datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S"), datetime.datetime.utcnow().isoformat("T")+"Z"]
 
-while True:
-    print("running ...")
-    run()
-    time.sleep(60.0 - ((time.time() - starttime) % 60.0))
+def start():
+    while True:
+        starttime = time.time()
+        read_sensor_data()
+        send_sensor_data()
+        time.sleep(60.0 - ((time.time() - starttime) % 60.0))
 
-print("Stopped")
+def socket_thread():
+    serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    serversocket.bind(('localhost', 8367))
+    serversocket.listen(5)
+    while True:
+        connection, address = serversocket.accept()
+        connection.send(dumps(data_array))
+
+sensorID  = "raspi-" + getSerial()
+
+t1 = Thread(target = start)
+t2 = Thread(target = socket_thread)
+
+t1.start()
+t2.start()
